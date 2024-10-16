@@ -7,40 +7,13 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 import transformers
 from os.path import join, exists
 from os import makedirs
-from datasets import load_dataset
 from xai.xai_mistral import override_mistral_xai_layers
 from xai.xai_llama import override_llama_xai_layers
 from transformers.generation import StoppingCriteria, StoppingCriteriaList
 import itertools
 from evaluation.utils import normalize_responses, normalized_text
 from plot.plot_utils import plot_heatmap
-from xai.flipping import flip
-
-
-def merge_hyphens(tokens, importance):
-    adjusted_tokens = []
-    adjusted_importance = []
-    initial_symbols = ["L", "l", "Dall", "dall", "all", "dell", "nell", "d", "C", "c", "sull", "un", "nient", "quest",
-                       "Un", "po"]
-    indices = [i for i, x in enumerate(tokens) if x in initial_symbols and tokens[i + 1] == "'"]
-
-    if len(indices) > 0:
-        i = 0
-        while i <= len(tokens) - 1:
-            if i in indices and i + 2 < len(tokens):
-                combined_token = tokens[i] + tokens[i + 1] + tokens[i + 2]
-                combined_heat = importance[i] + importance[i + 1] + importance[i + 2]
-                i += 3
-                adjusted_tokens.append(combined_token)
-                adjusted_importance.append(combined_heat)
-            else:
-                adjusted_tokens.append(tokens[i])
-                adjusted_importance.append(importance[i])
-                i += 1
-        return adjusted_tokens, adjusted_importance
-
-    else:
-        return tokens, importance
+from datasets import load_dataset
 
 
 def fix_syntax(pipeline, tokenizer, model_response, config):
@@ -70,49 +43,35 @@ def fix_syntax(pipeline, tokenizer, model_response, config):
     return responses[0]["generated_text"].strip()
 
 
+def merge_hyphens(tokens, importance):
+    adjusted_tokens = []
+    adjusted_importance = []
+    initial_symbols = ["L", "l", "Dall", "dall", "all", "dell", "nell", "d", "C", "c", "sull", "un", "nient", "quest", "Un", "po"]
+    indices = [i for i, x in enumerate(tokens) if x in initial_symbols and tokens[i+1] == "'"]
+
+    if len(indices) > 0:
+        i = 0
+        while i <= len(tokens)-1:
+            if i in indices and i + 2 < len(tokens):
+                combined_token = tokens[i] + tokens[i + 1] + tokens[i + 2]
+                combined_heat = importance[i] + importance[i + 1] + importance[i + 2]
+                i += 3
+                adjusted_tokens.append(combined_token)
+                adjusted_importance.append(combined_heat)
+            else:
+                adjusted_tokens.append(tokens[i])
+                adjusted_importance.append(importance[i])
+                i += 1
+        return adjusted_tokens, adjusted_importance
+
+    else:
+        return tokens, importance
+
+
 def rat_num(len_sen, rationale):
-    try:
-        rationale = [el - 1 for el in list(map(int, rationale.split(",")))] if len(rationale.split(",")) > 1 else [
-            int(float(rationale)) - 1]
-        return [1 if idx in rationale else 0 for idx in range(len_sen)]
-    except ValueError:
-        import pdb;
-        pdb.set_trace()
-
-
-def prepare_sst_dataset():
-    dataset = load_dataset("coastalcph/fair-rationales", 'sst2', trust_remote_code=True)
-    df = pd.DataFrame(dataset['train'])
-    df_ = df.groupby('originaldata_id')
-
-    df_out = pd.DataFrame(columns=['id', 'sentence', 'label', 'rationale_numeric', 'rationale_binary'])
-
-    labels = {0: 'negative', 1: 'positive'}
-    labels_inv = {v: k for k, v in labels.items()}
-
-    rationales = {}
-    ii = 0
-    for id, subdf in df_:
-        rationales[id] = {}
-        sentence = list(set(subdf['sentence']))
-        assert len(sentence) == 1
-        sentence = sentence[0]
-
-        subdf = subdf.copy()
-        subdf = subdf.query("original_label==label")
-
-        subdf['len_sen'] = None
-        subdf['len_sen'] = subdf['sentence'].apply(lambda x: len(x.split(" ")))
-
-        rationales[id]['rationale_numeric'] = subdf.apply(lambda x: rat_num(x.len_sen, x.rationale_index), axis=1)
-        rationales[id]['rationale_numeric'] = np.mean(rationales[id]['rationale_numeric'].tolist(), axis=0)
-        rationales[id]['rationale_binary'] = [1 if rat >= .5 else 0 for rat in rationales[id]['rationale_numeric']]
-
-        df_out.loc[ii] = [id, sentence, subdf['label'].iloc[0], rationales[id]['rationale_numeric'],
-                          rationales[id]['rationale_binary']]
-        ii += 1
-
-    return df_out, labels
+    rationale = [el - 1 for el in list(map(int, rationale.split(",")))] if len(rationale.split(",")) > 1 else [
+        int(float(rationale)) - 1]
+    return [1 if idx in rationale else 0 for idx in range(len_sen)]
 
 
 def prepare_sst_multilingual_dataset(language):
@@ -144,8 +103,7 @@ def prepare_sst_multilingual_dataset(language):
         normalized_sentence = row['normalized']
         if language == 'EN':
             dataset.loc[idx, 'rationale_binary'].extend([int(word[-2]) for word in row['Span'].split('|')])
-            dataset.loc[idx, 'rationales'].extend(
-                [word[:-3] for word in row['Span'].split("|") if word.endswith("(1)")])
+            dataset.loc[idx, 'rationales'].extend([word[:-3] for word in row['Span'].split("|") if word.endswith("(1)")])
         elif language == 'DK':
             punctuation_dk = ['.', ';', ',', '?', '(', ')', ':', '!']
             span = [word[:-3] for word in row['Span'].split('|')
@@ -203,6 +161,48 @@ def prepare_labour_dataset(article_id):
     return dataset_df, article_label, article_definition
 
 
+def prepare_sst_dataset():
+    dataset = load_dataset("coastalcph/fair-rationales", 'sst2', trust_remote_code=True)
+    df = pd.DataFrame(dataset['train'])
+    df_ = df.groupby('originaldata_id')
+
+    df_out = pd.DataFrame(columns=['id', 'sentence', 'label', 'rationale_numeric', 'rationale_binary'])
+
+    labels = {0: 'negative', 1: 'positive'}
+
+    rationales = {}
+    ii = 0
+    for id, subdf in df_:
+        rationales[id] = {}
+        sentence = list(set(subdf['sentence']))
+        assert len(sentence) == 1
+        sentence = sentence[0]
+
+        subdf = subdf.copy()
+        subdf = subdf.query("original_label==label")
+
+        subdf['len_sen'] = None
+        subdf['len_sen'] = subdf['sentence'].apply(lambda x: len(x.split(" ")))
+
+        rationales[id]['rationale_numeric'] = subdf.apply(lambda x: rat_num(x.len_sen, x.rationale_index), axis=1)
+        rationales[id]['rationale_numeric'] = np.mean(rationales[id]['rationale_numeric'].tolist(), axis=0)
+        rationales[id]['rationale_binary'] = [1 if rat >= .5 else 0 for rat in rationales[id]['rationale_numeric']]
+
+        df_out.loc[ii] = [id, sentence, subdf['label'].iloc[0], rationales[id]['rationale_numeric'],
+                          rationales[id]['rationale_binary']]
+        ii += 1
+
+    return df_out, labels
+
+
+# Function to find the start and end indices of the specific sentence in input_ids
+def find_subsequence(input_ids, sentence_ids):
+    for i in range(len(input_ids) - len(sentence_ids) + 1):
+        if input_ids[i:i + len(sentence_ids)] == sentence_ids:
+            return i, i + len(sentence_ids) - 1
+    return None, None
+
+
 # Define the custom stopping criteria
 class StopOnAnyTokenSequence(StoppingCriteria):
     def __init__(self, stop_sequences_ids):
@@ -217,16 +217,8 @@ class StopOnAnyTokenSequence(StoppingCriteria):
         return False
 
 
-# Function to find the start and end indices of the specific sentence in input_ids
-def find_subsequence(input_ids, sentence_ids):
-    for i in range(len(input_ids) - len(sentence_ids) + 1):
-        if input_ids[i:i + len(sentence_ids)] == sentence_ids:
-            return i, i + len(sentence_ids) - 1
-    return None, None
-
-
 def main():
-    ''' set default hyperparams in default_hyperparams.py '''
+    """ set default hyperparams in default_hyperparams.py """
     parser = argparse.ArgumentParser()
 
     # Required arguments
@@ -254,9 +246,7 @@ def main():
     if not exists(DATA_DIR):
         makedirs(DATA_DIR)
 
-    #    DATA_DIR_DATASET = join(DATA_DIR, config.dataset_name, config.model_name_short, config.sparsity, config.seed)
     model_xai_name = config.model_name_short if config.xai == 'none' else config.model_name_short + '_' + config.xai
-
     DATA_DIR_DATASET = join(DATA_DIR, config.dataset_name, model_xai_name, config.sparsity, str(config.seed))
 
     if not exists(DATA_DIR_DATASET):
@@ -304,9 +294,8 @@ def main():
 
     if config.xai == 'random':
         assert config.model_name_short == 'mixtral'
-        
-    if config.xai.split('_')[0] in ['lrp', 'gi']:
 
+    if config.xai.split('_')[0] in ['lrp', 'gi']:
         test_ids = tokenizer("Paris is the capital of", return_tensors='pt').to(model.device)
         test1 = model(**test_ids).logits
 
@@ -364,7 +353,6 @@ def main():
             tokenizer=tokenizer_syntax,
         )
 
-
     if config.xai in ['lrp', 'gi', 'lrp_min', 'gi_min', 'lrp_contrast', 'gi_contrast', 'random']:
         # Define a subtoken indicative when the model selects an answer
         if config.model_name_short in ["llama3", "llama"]:
@@ -373,7 +361,7 @@ def main():
             stop_token_ids = [tokenizer(token, add_special_tokens=False).input_ids for token in answer_tokens]
 
     if config.xai in ['lrp', 'gi', 'lrp_min', 'gi_min', 'lrp_contrast', 'gi_contrast', 'random']:
-        # Define a siubtoken indicative when the model selects an answer
+        # Define a subtoken indicative when the model selects an answer
         if config.model_name_short in ["llama3", "llama", "mistral", "mixtral"]:
             # answer_tokens = ['(a)', 'a)', 'yes', '(b)', 'b)', 'no']
             answer_tokens = ['(a', 'yes', '(b', 'no']
@@ -402,71 +390,37 @@ def main():
                           f'(b) No, this text does not contain any evidence for "{article_label}"\n'
                           'Answer:']
 
-
     elif config.dataset_name == 'sst':
         data, label_dict = prepare_sst_dataset()
 
-        if config.shuffle:
-            general_prompt = ['Consider the following movie review: {} \n'
-                              'Choose one of the following options and start your answer with the respective letter: \n'
-                              '(a) This review is overall rather negative \n'
-                              '(b) This review is overall rather positive \n'
-                              'Answer:']
+        general_prompt = ['Consider the following movie review: {} \n'
+                          'Choose one of the following options and start your answer with the respective letter: \n'
+                          '(a) This review is overall rather positive \n'
+                          '(b) This review is overall rather negative \n'
+                          'Answer:']
 
-        else:
+    elif config.dataset_name == 'sst_multilingual':
+
+        data, label_dict = prepare_sst_multilingual_dataset(config.language)
+        #  language_dict = {'EN': 'English', 'IT': 'Italian', 'DK': 'Danish'} # not needed I think
+        if config.language == 'EN':
             general_prompt = ['Consider the following movie review: {} \n'
                               'Choose one of the following options and start your answer with the respective letter: \n'
                               '(a) This review is overall rather positive \n'
                               '(b) This review is overall rather negative \n'
                               'Answer:']
-
-            options = {
-                1: '(a) This review is overall rather positive',
-                0: '(b) This review is overall rather negative'}
-
-    elif config.dataset_name == 'sst_multilingual':
-    
-        data, label_dict = prepare_sst_multilingual_dataset(config.language)
-      #  language_dict = {'EN': 'English', 'IT': 'Italian', 'DK': 'Danish'} # not needed I think
-        if config.language == 'EN':
-            if config.shuffle:
-                general_prompt = ['Consider the following movie review: {} \n'
-                                  'Choose one of the following options and start your answer with the respective letter: \n'
-                                  '(a) This review is overall rather negative \n'
-                                  '(b) This review is overall rather positive \n'
-                                  'Answer:']
-            else:
-                general_prompt = ['Consider the following movie review: {} \n'
-                                  'Choose one of the following options and start your answer with the respective letter: \n'
-                                  '(a) This review is overall rather positive \n'
-                                  '(b) This review is overall rather negative \n'
-                                  'Answer:']
         elif config.language == 'IT':
-            if config.shuffle:
-                general_prompt = ['Considera la seguente recensione di un film: {} \n'
-                                  'Scegli una delle seguenti opzioni e inizia la tua risposta con la rispettiva lettera: \n'
-                                  '(a) Questa recensione è nel complesso piuttosto negativa \n'
-                                  '(b) Questa recensione è nel complesso piuttosto positiva \n'
-                                  'Risposta:']
-            else:
-                general_prompt = ['Considera la seguente recensione di un film: {} \n'
-                                  'Scegli una delle seguenti opzioni e inizia la tua risposta con la rispettiva lettera: \n'
-                                  '(a) Questa recensione è nel complesso piuttosto positiva \n'
-                                  '(b) Questa recensione è nel complesso piuttosto negativa \n'
-                                  'Risposta:']
+            general_prompt = ['Considera la seguente recensione di un film: {} \n'
+                              'Scegli una delle seguenti opzioni e inizia la tua risposta con la rispettiva lettera: \n'
+                              '(a) Questa recensione è nel complesso piuttosto positiva \n'
+                              '(b) Questa recensione è nel complesso piuttosto negativa \n'
+                              'Risposta:']
         elif config.language == 'DK':
-            if config.shuffle:
-                general_prompt = ['Overvej følgende filmanmeldelse: {} \n'
-                                  'Vælg en af følgende muligheder, og start dit svar med det pågældende bogstav: \n'
-                                  '(a) Denne anmeldelse er generelt ret negativ \n'
-                                  '(b) Denne anmeldelse er generelt ret positiv \n'
-                                  'Svar:']
-            else:
-                general_prompt = ['Overvej følgende filmanmeldelse: {} \n'
-                                  'Vælg en af følgende muligheder, og start dit svar med det pågældende bogstav: \n'
-                                  '(a) Denne anmeldelse er generelt ret positiv \n'
-                                  '(b) Denne anmeldelse er generelt ret negativ \n'
-                                  'Svar:']
+            general_prompt = ['Overvej følgende filmanmeldelse: {} \n'
+                              'Vælg en af følgende muligheder, og start dit svar med det pågældende bogstav: \n'
+                              '(a) Denne anmeldelse er generelt ret positiv \n'
+                              '(b) Denne anmeldelse er generelt ret negativ \n'
+                              'Svar:']
         else:
             raise NotImplementedError(f"Language {config.language} not supported")
             # general_prompt = ['Consider the following movie review in {}: {} \n',
@@ -544,13 +498,13 @@ def main():
 
         example[f'response_{idx}'] = responses.strip()
         example['annotation_request'] = annotation_request
-        example = normalize_responses(example, idx, config.shuffle)
+        example = normalize_responses(example, idx, shuffle=False)
 
         print(example[f'normalized_response_{idx}'], example['true_label'])
 
         condition = (example[f'normalized_response_{idx}'] == 1 and example['true_label'] == 1) \
             if config.dataset_name == 'forced_labour' else (
-                    example[f'normalized_response_{idx}'] == example['true_label'])
+                example[f'normalized_response_{idx}'] == example['true_label'])
 
         print('condition', idx, condition)
 
@@ -687,8 +641,7 @@ def main():
 
             # context_ids = tokenizer(f' {example["content"].strip()}', add_special_tokens=False).input_ids
 
-          #  tokenizer.convert_ids_to_tokens( tokenizer(f': {example["content"].strip()}', add_special_tokens=False).input_ids[1:])
-
+            #  tokenizer.convert_ids_to_tokens( tokenizer(f': {example["content"].strip()}', add_special_tokens=False).input_ids[1:])
 
             # if config.dataset_name == 'forced_labour':
             #     context_ids = tokenizer(f' {example["content"].strip()}', add_special_tokens=False).input_ids
@@ -735,10 +688,6 @@ def main():
                                                                                              logit_score,
                                                                                              relevance.sum())
 
-                if len(output_words) != len(relevance_with_next):
-                    import pdb;
-                    pdb.set_trace()
-
                 relevance_with_next_normalized = relevance_with_next / np.max(np.abs(relevance_with_next))
                 html_heatmap = plot_heatmap(output_words, relevance_with_next_normalized, title, transparency=95)
 
@@ -776,9 +725,7 @@ def main():
         # Flippig analysis / Prepare flipping analysis
         if 'relevance_{}'.format(config.xai) in example:
             if example['relevance_{}'.format(config.xai)] not in ['N/T', 'N/A']:
-
                 if condition:
-                    output_words[start_idx:end_idx + 1]
                     context_mask = np.zeros(tokenized_chat_until_answer.shape[-1])
                     context_mask[start_idx:end_idx + 1] = 1.
                     answer = next_token
@@ -794,65 +741,13 @@ def main():
                                                'answer': int(next_token),
                                                'seed': int(config.seed)}
 
-                    if False:
-                        # Dont flip in here for now, do it in eval
-                        R = np.array(example['relevance_{}'.format(config.xai)])
-
-                        # Only keep relevance for context
-                        R[context_mask.squeeze() != 1] = -10e6
-
-                        fracs = np.linspace(0, 1, 11)
-
-                        # replace_token_id = int(tokenizer("_", add_special_tokens=False).input_ids[0])
-
-                        if 'llama' in config.model_name_short:
-                            replace_token_id = int(tokenizer("_", add_special_tokens=False).input_ids[0])
-                        else:
-                            replace_token_id = tokenizer.unk_token_id
-
-                        E, E_log, M = flip(model, tokenizer, tokenized_chat_until_answer, R, answer, replace_token_id,
-                                           int(context_mask.sum()), fracs=fracs)
-
-                        example['perturbation']['E'] = (E, E_log)
-
-                        # plotting flipping
-
-                        PLOT_DIR_DATASET_FLIP = join(DATA_DIR_DATASET, config.model_name_short, 'flip')
-                        if not exists(PLOT_DIR_DATASET_FLIP):
-                            makedirs(PLOT_DIR_DATASET_FLIP)
-
-                        flip_evolution = M['flip_evolution']  # [frac]
-
-                        for frac in [0.0, 0.5, 1.0]:
-                            t_ = flip_evolution[frac][0].squeeze().tolist()
-
-                            output_words = tokenizer.convert_ids_to_tokens(t_, skip_special_tokens=False)
-                            output_words = [token.replace('Ġ', '') for token in output_words]
-
-                            title = r''
-
-                            # Plot full input prompt heatmap
-                            R_flip = R / np.max(np.abs(R))
-                            html_heatmap = plot_heatmap(output_words, R_flip, title, transparency=95)
-
-                            output_name = f'heatmap_article_{config.article_id}'  # if config.dataset_name == 'forced_labour' else output_name
-                            output_name = output_name + f'_{config.language}' if config.dataset_name == 'sst_multilingual' else output_name
-                            output_name = output_name + f'_idx_{idx}' + f'_{config.xai}' + "_frac_{}".format(frac)
-
-                            html_file = join(PLOT_DIR_DATASET_FLIP, f"{output_name}.html")
-
-                            # Save the HTML content to a temporary file
-                            with open(html_file, 'w') as file:
-                                file.write(html_heatmap)
-
-        ######## i move this block directly after the generation above now (and think it can be removed here)
         print(
             f'RESPONSE GIVEN PROMPT [{idx}]:\n True label: {example["true_label"]} \n {responses.strip()}')
         print("-" * 50)
 
         example[f'response_{idx}'] = responses.strip()
         example['annotation_request'] = annotation_request
-        example = normalize_responses(example, idx, config.shuffle)
+        example = normalize_responses(example, idx, shuffle=False)
 
         condition = (example[f'normalized_response_{idx}'] == 1 and example['true_label'] == 1) \
             if config.dataset_name == 'forced_labour' else (
@@ -946,43 +841,7 @@ def main():
                         }
                     ]
             else:
-                if config.sparsity == 'phrases':
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": annotation_request,
-                        },
-                        {
-                            "role": "assistant",
-                            "content": responses.strip()
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Return the individual words and phrases of the text that show evidence for '{article_label}'. Format your "
-                                       f"output as a list of json entries with each entry having one field 'rationales' with the relevant part of the text. "
-                                       f"Output only the list and no other text than parts of the input text, separate different parts by a ','."
-                        }
-                    ]
-
-                elif config.sparsity == 'words':
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": annotation_request,
-                        },
-                        {
-                            "role": "assistant",
-                            "content": responses.strip()
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Return the individual words of the text that show evidence for '{article_label}'. Format your "
-                                       f"output as a list of json entries with each entry having one field 'rationales' with the relevant part of the text. "
-                                       f"Output only the list and no other text than parts of the input text, separate different parts by a ','."
-                        }
-                    ]
-
-                elif config.sparsity == 'full':
+                if config.sparsity == 'full':
                     messages = [
                         {
                             "role": "user",
@@ -1019,24 +878,7 @@ def main():
                                        f"separate different words by a ','."
                         }
                     ]
-                elif config.sparsity == 'sorting':
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": annotation_request,
-                        },
-                        {
-                            "role": "assistant",
-                            "content": responses.strip()
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Return individual words from the text that show evidence for '{article_label}'. Format your "
-                                       f"output as a list of json entries with each entry having one field 'rationales' with the respective word. "
-                                       f"Sort the list by relevance to the label from most important to least important, only include words that are relevant for '{article_label}'."
-                                       f"Output only the list and no other text than parts of the input text, separate different parts by a ','."
-                        }
-                    ]
+
                 else:
                     raise ValueError(f"Sparsity level {config.sparsity} not implemented")
             tokenized_chat = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
@@ -1059,39 +901,21 @@ def main():
 
             num_rationales += 1
 
-            # print(
-            #     f'PROMPT [{idx}]:\n {messages[1]["content"]} \n {messages[2]["content"]}')
-            # print("-" * 50)
-
             print(
                 f'RATIONALES GIVEN PROMPT [{idx}]:\n True label: {example["true_label"]} \n {rationales.strip()}')
             print("-" * 50)
 
         examples.append(example)
-
         torch.cuda.empty_cache()
 
         if config.max_samples is not None:
             if idx == config.max_samples:
                 break
 
-    print('-' * 50)
-    print('MADE IT UNTIL HERE')
-    print('-' * 50)
-
     output_name = f'{config.model_name_short}_rationales'
     output_name = output_name + f'_article_{config.article_id}' if config.dataset_name == 'forced_labour' else output_name
     output_name = output_name + f'_{config.language}' if config.dataset_name == 'sst_multilingual' else output_name
-    output_name = output_name + '_shuffle' if config.shuffle else output_name
     output_name = output_name + '_quant' if config.quant else output_name
-
-    # ii = 0
-
-    # while isfile(join(DATA_DIR_DATASET, f"{output_name}.jsonl")):
-    #     output_name += f'_{ii}'
-    #     ii += 1
-
-    # output_name = output_name + '_debug'
 
     output_name = output_name + f'_seed_{config.seed}' if config.seed is not None else output_name
     output_name = output_name + f'_sparsity_{config.sparsity}' if config.sparsity != 'full' else output_name
@@ -1101,13 +925,6 @@ def main():
     with open(join(DATA_DIR_DATASET, f"{output_name}.jsonl"), "w") as f:
         for example in examples:
             f.write(json.dumps(example) + "\n")
-
-    # f, ax = plt.subplots(1, 1, figsize=(8, 6))
-    # Es = [e['perturbation']['E'][0] for e in examples if 'perturbation' in e]
-    # ax.plot(fracs, np.nanmean(Es, axis=0), label=config.xai)
-    # plt.legend()
-    # f.savefig(join(DATA_DIR_DATASET,f"{config.model_name_short}_{config.xai}_flipping.png"), dpi=200)
-    # plt.close()
 
 
 if __name__ == '__main__':

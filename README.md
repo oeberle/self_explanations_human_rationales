@@ -4,7 +4,7 @@ https://arxiv.org/pdf/2410.03296
 
 
 ## First Steps
-Set-up a suitbale environment, see `requirements.txt`. We used `python=3.11.8'.
+Set-up a suitable environment, see `requirements.txt`. We used `python=3.11.8'.
 
 
 ## Scripts
