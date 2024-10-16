@@ -8,7 +8,7 @@ Set-up a suitbale environment, see `requirements.txt`. We used `python=3.11.8'.
 
 
 ## Scripts
-* `rationale_prompting.py`: runs the prompting procedure, see `run_prompting.sh' for usage. 
+* `rationale_prompting.py`: runs the prompting procedure, see `run_eval.sh' for usage. 
 * `model_human_comparison.py`: runs the evaluation procedure, see `run_eval.sh' for usage.  
 
 
