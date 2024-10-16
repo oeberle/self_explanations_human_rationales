@@ -56,7 +56,7 @@ do
             MODEL=$(echo $MODEL_INFO | awk '{print $1}')
             MODEL_SHORT=$(echo $MODEL_INFO | awk '{print $2}')
             
-            for XAI in lrp  random lrp_contrast
+            for XAI in lrp random lrp_contrast
             do
                 python model_human_comparison.py \
                   --dataset_name ${DATASET}  \
