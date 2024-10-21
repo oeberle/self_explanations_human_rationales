@@ -1,4 +1,3 @@
-from utils import AUTH_TOKEN
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import torch.nn as nn
