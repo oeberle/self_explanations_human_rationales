@@ -6,7 +6,7 @@ import numpy as np
 import datetime
 import logging
 
-AUTH_TOKEN='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'
+AUTH_TOKEN=None
 
 def get_base_str(task, m, lang, sparsity, seed, xai_method):
     root = "model_responses/eval_results/{}/{}/{}/{}/{}/".format(task, m, sparsity, seed, xai_method)
