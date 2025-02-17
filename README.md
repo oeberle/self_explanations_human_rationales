@@ -11,6 +11,9 @@ Set-up a suitable environment, see `requirements.txt`. We used `python=3.11.8'.
 * `rationale_prompting.py`: runs the prompting procedure, see `run_eval.sh' for usage. 
 * `model_human_comparison.py`: runs the evaluation procedure, see `run_eval.sh' for usage.  
 
+## Plots
+* `pos_rel_analysis.py`: runs and plots the POS analysis where we show difference in relative POS distribution with human rationales as baseline.
+
 ## Files
 * `model_responses/`: already contains the model responses for SST.
 

@@ -46,12 +46,13 @@ def fix_syntax(pipeline, tokenizer, model_response, config):
 def merge_hyphens(tokens, importance):
     adjusted_tokens = []
     adjusted_importance = []
-    initial_symbols = ["L", "l", "Dall", "dall", "all", "dell", "nell", "d", "C", "c", "sull", "un", "nient", "quest", "Un", "po"]
-    indices = [i for i, x in enumerate(tokens) if x in initial_symbols and tokens[i+1] == "'"]
+    initial_symbols = ["L", "l", "Dall", "dall", "all", "dell", "nell", "d", "C", "c", "sull", "un", "nient", "quest",
+                       "Un", "po"]
+    indices = [i for i, x in enumerate(tokens) if x in initial_symbols and tokens[i + 1] == "'"]
 
     if len(indices) > 0:
         i = 0
-        while i <= len(tokens)-1:
+        while i <= len(tokens) - 1:
             if i in indices and i + 2 < len(tokens):
                 combined_token = tokens[i] + tokens[i + 1] + tokens[i + 2]
                 combined_heat = importance[i] + importance[i + 1] + importance[i + 2]
@@ -103,7 +104,8 @@ def prepare_sst_multilingual_dataset(language):
         normalized_sentence = row['normalized']
         if language == 'EN':
             dataset.loc[idx, 'rationale_binary'].extend([int(word[-2]) for word in row['Span'].split('|')])
-            dataset.loc[idx, 'rationales'].extend([word[:-3] for word in row['Span'].split("|") if word.endswith("(1)")])
+            dataset.loc[idx, 'rationales'].extend(
+                [word[:-3] for word in row['Span'].split("|") if word.endswith("(1)")])
         elif language == 'DK':
             punctuation_dk = ['.', ';', ',', '?', '(', ')', ':', '!']
             span = [word[:-3] for word in row['Span'].split('|')
@@ -229,8 +231,6 @@ def main():
     parser.add_argument('--dataset_name', default='meta-llama/Llama-2-13b-chat-hf', help='Dataset name')
     parser.add_argument('--language', default='EN', help='language for multilingual SST dataset')
     parser.add_argument('--model_name_short', default='llama', help='Model name in HF Hub')
-    parser.add_argument('--shuffle', action=argparse.BooleanOptionalAction,
-                        help='Whether to reverse order of options in prompt')
     parser.add_argument('--sparsity', default='full', help='How to prompt for rationales {full, phrases, words}')
     parser.add_argument('--quant', action=argparse.BooleanOptionalAction, help='Whether to quantize the model')
     parser.add_argument('--xai', default='none',
@@ -423,14 +423,6 @@ def main():
                               'Svar:']
         else:
             raise NotImplementedError(f"Language {config.language} not supported")
-            # general_prompt = ['Consider the following movie review in {}: {} \n',
-            #                   'Choose one of the following options and start your answer with the respective letter: \n'
-            #                   '(a) This review is overall rather positive"\n'
-            #                   '(b) This review is overall rather negative"\n'
-            #                   f'Answer in {language_dict[config.language]}.\n'
-            #                   'Answer:']
-
-
     else:
         raise ValueError(f"Dataset {config.dataset_name} not supported")
 
